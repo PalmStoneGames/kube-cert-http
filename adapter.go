@@ -1,6 +1,6 @@
-// kubeCertHTTP provides the needed adapters to easily fetch certificates from kubernetes secrets and use them to serve http/1.1, http/2, or any other protocol compatible with tls.Config.
+// kubecerthttp provides the needed adapters to easily fetch certificates from kubernetes secrets and use them to serve http/1.1, http/2, or any other protocol compatible with tls.Config.
 // The expected format of the secrets within kubernetes is the standard kubernetes.io/tls format, which is a secret with a tls.crt and tls.key.
-package kubeCertHTTP
+package kubecerthttp
 
 import (
 	"crypto/tls"
