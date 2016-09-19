@@ -98,7 +98,7 @@ func startMonitor(apiHost, namespace string, certMap map[string]*tls.Certificate
 				}
 
 				switch event.Type {
-				case "ADDED":
+				case "ADDED", "MODIFIED":
 					tlsCert, err := parseCert(domain, secretName, &event.Object)
 					if err != nil {
 						log.Printf("[%v] Error while parsing TLS cert: %v", domain, err)
