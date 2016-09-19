@@ -112,6 +112,8 @@ func startMonitor(apiHost, namespace string, certMap map[string]*tls.Certificate
 
 					if !isExisting {
 						log.Printf("[%v] Added certificiate data", domain)
+					} else if event.Type == "MODIFIED" {
+						log.Printf("[%v] Updated certificate data", domain)
 					}
 				case "DELETED":
 					mutex.Lock()
