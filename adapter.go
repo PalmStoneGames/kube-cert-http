@@ -41,8 +41,9 @@ type secretEvent struct {
 // NewTLSConfig returns a TLS config that will fetch tls certificates from kubernetes secrets with the given prefix.
 // By default, the tls.Config is configured to work with http/1.1 and http/2.
 // apiHost is the endpoint at which we can connect to kubernetes, usually this is 127.0.0.1:8001 when using kubectl proxy, which is exposed in the constant ApiHostKubectlProxy.
-// certPrefix is the prefix to add to secret names before fetching them from kubernetes
-func NewTLSConfig(apiHost, namespace string) *tls.Config {
+// namespace is the kubernetes namespace to use, to use the default namespace, use the DefaultNamespace constant
+// hosts is the hosts to actually fetch certificates for, if left empty all hosts for which certs can be found for will be used
+func NewTLSConfig(apiHost, namespace string, hosts ...string) *tls.Config {
 	// Bookkeeping variables
 	certMap := make(map[string]*tls.Certificate)
 	mutex := new(sync.RWMutex)
@@ -60,12 +61,31 @@ func NewTLSConfig(apiHost, namespace string) *tls.Config {
 	tlsCfg.NextProtos = []string{"h2", "http/1.1"}
 
 	// Monitor routine
-	startMonitor(apiHost, namespace, certMap, mutex)
+	startMonitor(apiHost, namespace, certMap, mutex, hosts)
 
 	return tlsCfg
 }
 
-func startMonitor(apiHost, namespace string, certMap map[string]*tls.Certificate, mutex *sync.RWMutex) {
+// ListenAndServe directly starts a http and http/2 server
+// apiHost is the endpoint at which we can connect to kubernetes, usually this is 127.0.0.1:8001 when using kubectl proxy, which is exposed in the constant ApiHostKubectlProxy.
+// namespace is the kubernetes namespace to use, to use the default namespace, use the DefaultNamespace constant
+// handler is the http handler to call
+// hosts is the hosts to actually fetch certificates for, if left empty all hosts for which certs can be found for will be used
+func ListenAndServeTLS(addr string, apiHost, namespace string, handler http.Handler, hosts ...string) error {
+	srv := &http.Server{Addr: addr, Handler: handler, TLSConfig: NewTLSConfig(apiHost, namespace)}
+	return srv.ListenAndServeTLS("", "")
+}
+
+func startMonitor(apiHost, namespace string, certMap map[string]*tls.Certificate, mutex *sync.RWMutex, hosts []string) {
+	// convert hosts to a map for convenience
+	var hostMap map[string]struct{}
+	if hosts != nil {
+		hostMap = make(map[string]struct{})
+		for _, host := range hosts {
+			hostMap[host] = struct{}{}
+		}
+	}
+
 	go func() {
 		c, errC := monitorSecretEvents(apiHost, namespace)
 		for {
@@ -99,6 +119,12 @@ func startMonitor(apiHost, namespace string, certMap map[string]*tls.Certificate
 
 				switch event.Type {
 				case "ADDED", "MODIFIED":
+					if hostMap != nil {
+						if _, ok := hostMap[domain]; !ok {
+							log.Printf("[%v] Skipping domain", domain)
+							continue
+						}
+					}
 					tlsCert, err := parseCert(domain, secretName, &event.Object)
 					if err != nil {
 						log.Printf("[%v] Error while parsing TLS cert: %v", domain, err)
@@ -117,24 +143,19 @@ func startMonitor(apiHost, namespace string, certMap map[string]*tls.Certificate
 					}
 				case "DELETED":
 					mutex.Lock()
+					_, exists := certMap[domain]
 					delete(certMap, domain)
 					mutex.Unlock()
-					log.Printf("[%v] Removed certificate data", domain)
+
+					if exists {
+						log.Printf("[%v] Removed certificate data", domain)
+					}
 				}
 			case err := <-errC:
 				log.Printf("Error while monitoring kubernetes secrets for SSL certs: %v", err)
 			}
 		}
 	}()
-}
-
-// ListenAndServe directly starts a http and http/2 server
-// apiHost is the endpoint at which we can connect to kubernetes, usually this is 127.0.0.1:8001 when using kubectl proxy, which is exposed in the constant ApiHostKubectlProxy.
-// namespace is the kubernetes namespace to use, to use the default namespace, use the DefaultNamespace constant
-// certPrefix is the prefix to add to secret names before fetching them from kubernetes
-func ListenAndServeTLS(addr string, apiHost, namespace string, handler http.Handler) error {
-	srv := &http.Server{Addr: addr, Handler: handler, TLSConfig: NewTLSConfig(apiHost, namespace)}
-	return srv.ListenAndServeTLS("", "")
 }
 
 func monitorSecretEvents(apiHost, namespace string) (<-chan secretEvent, <-chan error) {
