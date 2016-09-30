@@ -16,7 +16,7 @@ import (
 
 const (
 	// secretsEndpoint is the path to fetch kubernetes secrets
-	secretsWatchEndpoint = "%s/api/v1/namespaces/%s/secrets?watch=true"
+	secretsWatchEndpoint = "%s/api/v1/namespaces/%s/secrets?watch=true&resourceVersion=%s"
 
 	// APIHostKubectlProxy is the typical API host to use when using kubectl proxy in the pod
 	APIHostKubectlProxy = "http://127.0.0.1:8001"
@@ -162,8 +162,9 @@ func monitorSecretEvents(apiHost, namespace string) (<-chan secretEvent, <-chan 
 	events := make(chan secretEvent)
 	errc := make(chan error, 1)
 	go func() {
+		resourceVersion := "0"
 		for {
-			resp, err := http.Get(fmt.Sprintf(secretsWatchEndpoint, apiHost, namespace))
+			resp, err := http.Get(fmt.Sprintf(secretsWatchEndpoint, apiHost, namespace, resourceVersion))
 			if err != nil {
 				errc <- err
 				time.Sleep(5 * time.Second)
@@ -184,6 +185,9 @@ func monitorSecretEvents(apiHost, namespace string) (<-chan secretEvent, <-chan 
 						errc <- err
 					}
 					break
+				}
+				if s, ok := event.Object.Metadata["resourceVersion"].(string); ok {
+					resourceVersion = s
 				}
 				events <- event
 			}
