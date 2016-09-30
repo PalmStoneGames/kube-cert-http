@@ -163,17 +163,14 @@ func monitorSecretEvents(apiHost, namespace string) (<-chan secretEvent, <-chan 
 	errc := make(chan error, 1)
 	go func() {
 		resourceVersion := "0"
-		for {
+		watch := func() error {
 			resp, err := http.Get(fmt.Sprintf(secretsWatchEndpoint, apiHost, namespace, resourceVersion))
 			if err != nil {
-				errc <- err
-				time.Sleep(5 * time.Second)
-				continue
+				return err
 			}
+			defer resp.Body.Close()
 			if resp.StatusCode != 200 {
-				errc <- errors.New("Invalid status code: " + resp.Status)
-				time.Sleep(5 * time.Second)
-				continue
+				return errors.New("Invalid status code: " + resp.Status)
 			}
 
 			decoder := json.NewDecoder(resp.Body)
@@ -182,7 +179,7 @@ func monitorSecretEvents(apiHost, namespace string) (<-chan secretEvent, <-chan 
 				err = decoder.Decode(&event)
 				if err != nil {
 					if err != io.EOF {
-						errc <- err
+						return err
 					}
 					break
 				}
@@ -191,6 +188,13 @@ func monitorSecretEvents(apiHost, namespace string) (<-chan secretEvent, <-chan 
 				}
 				events <- event
 			}
+			return nil
+		}
+		for {
+			if err := watch(); err != nil {
+				errc <- err
+			}
+			time.Sleep(5 * time.Second)
 		}
 	}()
 
